@@ -22,11 +22,18 @@ GOOS=linux go build -o smbtree-linux cmd/smbtree/main.go
 
 ## Usage
 
-Run the tool with a target IP, CIDR range, or file containing targets.
-
-### Basic Scan
+### Quick Start (Aggressive)
+Scan a CIDR range with full speed (no jitter) and increased threads.
 ```bash
-./smbtree 192.168.1.0/24 -u "DOMAIN\User" -p "Password"
+./smbtree 10.10.0.0/24 -u administrator -p 'Password123' -d devop.local -no-limit -t 50
+```
+
+### Low & Slow (Stealth / Exfiltration)
+Load targets from a file, spread authentication over time, and configure exfiltration windows.
+**Note: All duration flags accept values in MINUTES.**
+
+```bash
+./smbtree hosts.txt -u administrator -p 'Password123' -d devop.local -auth-duration 60 -exfil-duration 30 -l ./smbtree-loot
 ```
 
 ### Key Bindings
@@ -37,9 +44,12 @@ Run the tool with a target IP, CIDR range, or file containing targets.
 -   **Space**: Select file/folder for batch operations.
 -   **p**: Pull (download) selected files.
 -   **f**: Force re-scan or force execution.
+-   **x**: Generate text report.
 -   **Ctrl+C**: Quit.
 
 ### Advanced Flags
--   `--no-limit`: Disable jitter for maximum speed.
--   `-t 100`: Set worker threads to 100.
--   `--loot "my_loot"`: Set custom download directory.
+-   `--no-limit`: Disable jitter/delay for maximum speed.
+-   `-t <int>`: Set worker threads (default 50).
+-   `--loot <dir>`: Set custom download directory.
+-   `--auth-duration <min>`: Spread initial authentication/scans over X minutes.
+-   `--exfil-duration <min>`: Spread file download jobs over X minutes.
