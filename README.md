@@ -47,9 +47,47 @@ Load targets from a file, spread authentication over time, and configure exfiltr
 -   **x**: Generate text report.
 -   **Ctrl+C**: Quit.
 
-### Advanced Flags
--   `--no-limit`: Disable jitter/delay for maximum speed.
--   `-t <int>`: Set worker threads (default 50).
--   `--loot <dir>`: Set custom download directory.
--   `--auth-duration <min>`: Spread initial authentication/scans over X minutes.
--   `--exfil-duration <min>`: Spread file download jobs over X minutes.
+### Full Usage Manual
+```text
+Usage: smbtree [flags] <target>
+Target: File path, IP/Hostname, or CIDR range.
+
+Authentication Flags:
+  -u string
+    	Username
+  -p string
+    	Password
+  -d string
+    	Domain
+  -H string
+    	NTLM Hash
+  -k	Use Kerberos
+  -no-pass
+    	Don't ask for password (use empty or guest)
+
+Delay & Concurrency Flags:
+  -auth-duration string
+    	Spread SMB auth/tree over time (e.g. 60m)
+  -exfil-duration string
+    	Spread Exfil/Pull over time (e.g. 120m)
+  -t int
+    	Number of concurrent threads (default 10)
+  -no-limit
+    	Disable all time delays (Go burr)
+  -D int
+    	Recursion depth for directories (default 2)
+
+Exfiltration Flags:
+  -exfil-method string
+    	Method: local, http (default local)
+  -exfil-url string
+    	HTTP URL for exfiltration
+  -l, --loot string
+    	Local directory for looted files (default 'loot')
+
+Mode Flags:
+  -headless
+    	Run in headless scan mode
+  -no-ping
+    	Disable ping sweep/live host discovery (treat all targets as live)
+```
