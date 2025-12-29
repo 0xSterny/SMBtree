@@ -1,0 +1,19 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+smbtree
+smbtree-linux*
+smbtree-macos*
+
+# Loot
+loot/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
