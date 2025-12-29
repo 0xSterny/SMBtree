@@ -24,7 +24,7 @@ func reorderArgs(args []string) []string {
 
 	// Map of boolean flags (that don't take arguments)
 	boolFlags := map[string]bool{
-		"headless": true, "k": true, "no-pass": true, "no-limit": true, "auth-hold": true, "a": true, "safe-shares": true, "s": true, "blind": true, "b": true,
+		"headless": true, "k": true, "no-pass": true, "no-limit": true, "blind": true, "b": true,
 	}
 
 	for i := 1; i < len(args); i++ {
@@ -72,8 +72,8 @@ func main() {
 	hash := flag.String("H", "", "NTLM Hash")
 	kerberos := flag.Bool("k", false, "Use Kerberos")
 	noPass := flag.Bool("no-pass", false, "Don't ask for password (use empty or guest)")
-	authHold := flag.Bool("auth-hold", true, "Hold SMB sessions open (persistent connection) to reduce logs")
-	flag.BoolVar(authHold, "a", true, "Hold SMB sessions open (alias)")
+	authHoldStr := flag.String("auth-hold", "true", "Hold SMB sessions open (persistent connection) to reduce logs")
+	flag.StringVar(authHoldStr, "a", "true", "Hold SMB sessions open (alias)")
 
 	// 2. Delay / OpSec
 	authDuration := flag.String("auth-duration", "0s", "Duration to spread SMB authentication/tree (e.g. 60m)")
@@ -82,8 +82,8 @@ func main() {
 	flag.StringVar(fileJitter, "j", "0s", "Jitter/Delay between directory reads (alias)")
 
 	// OPSEC Logic
-	safeShares := flag.Bool("safe-shares", true, "Skip administrative shares (C$, ADMIN$, IPC$)")
-	flag.BoolVar(safeShares, "s", true, "Skip administrative shares (alias)")
+	safeSharesStr := flag.String("safe-shares", "true", "Skip administrative shares (C$, ADMIN$, IPC$)")
+	flag.StringVar(safeSharesStr, "s", "true", "Skip administrative shares (alias)")
 
 	blindMode := flag.Bool("blind", false, "Blind Mode: Skip share access checks (reduces log noise)")
 	flag.BoolVar(blindMode, "b", false, "Blind Mode (alias)")
@@ -114,7 +114,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  -H string\n    \tNTLM Hash\n")
 		fmt.Fprintf(os.Stderr, "  -k\tUse Kerberos\n")
 		fmt.Fprintf(os.Stderr, "  -no-pass\n    \tDon't ask for password (use empty or guest)\n")
-		fmt.Fprintf(os.Stderr, "  -a, --auth-hold\n    \tHold SMB sessions open (persistent connection) (default true)\n")
+		fmt.Fprintf(os.Stderr, "  -a, --auth-hold string\n    \tHold SMB sessions open (persistent connection) (default true)\n")
 
 		fmt.Fprintln(os.Stderr, "\nDelay & Concurrency Flags:")
 		fmt.Fprintf(os.Stderr, "  -auth-duration string\n    \tSpread SMB auth/tree over time (e.g. 60m)\n")
@@ -125,7 +125,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  -D int\n    \tRecursion depth for directories (default 2)\n")
 
 		fmt.Fprintln(os.Stderr, "\nOPSEC Flags:")
-		fmt.Fprintf(os.Stderr, "  -s, --safe-shares\n    \tSkip administrative shares (C$, ADMIN$, IPC$) (default true)\n")
+		fmt.Fprintf(os.Stderr, "  -s, --safe-shares string\n    \tSkip administrative shares (C$, ADMIN$, IPC$) (default true)\n")
 		fmt.Fprintf(os.Stderr, "  -b, --blind\n    \tBlind Mode: Skip share access checks\n")
 
 		fmt.Fprintln(os.Stderr, "\nExfiltration Flags:")
@@ -232,15 +232,17 @@ func main() {
 	hosts = utils.ApplyGlobalCreds(hosts, globalCreds)
 
 	jitter, _ := time.ParseDuration(*fileJitter)
+	authHold := parseBool(*authHoldStr)
+	safeShares := parseBool(*safeSharesStr)
 
 	if *headlessMode {
-		runHeadless(hosts, exfilCfg, *threads, *depth, *lootDir, *authHold, *safeShares, *blindMode, jitter)
+		runHeadless(hosts, exfilCfg, *threads, *depth, *lootDir, authHold, safeShares, *blindMode, jitter)
 		return
 	}
 
 	// Reverted to always loading hosts directly due to Discovery TUI issues
 	// We will handle liveness checking JIT in the scanner
-	m := tui.NewModel(hosts, exfilCfg, exfilDur, *threads, *depth, *lootDir, *authHold, *safeShares, *blindMode, jitter)
+	m := tui.NewModel(hosts, exfilCfg, exfilDur, *threads, *depth, *lootDir, authHold, safeShares, *blindMode, jitter)
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
@@ -313,4 +315,9 @@ func runHeadless(hosts []utils.Host, exfilCfg exfil.Config, workerCount int, dep
 	// 3. Export
 	utils.GenerateReport(hosts)
 	fmt.Println("Report generated.")
+}
+
+func parseBool(s string) bool {
+	s = strings.ToLower(s)
+	return s == "true" || s == "t" || s == "1" || s == "yes" || s == "y"
 }

@@ -59,6 +59,7 @@ type Scheduler struct {
 
 	// Internal
 	pq           PriorityQueue
+	Signal       chan struct{} // Wake up signal
 	mu           sync.RWMutex
 	AuthHold     bool
 	SessionCache map[string]*smb.Session
@@ -78,6 +79,7 @@ func NewScheduler(workerCount int, exfilCfg exfil.Config, authHold bool, safeSha
 		Exfil:        exfil.NewHandler(exfilCfg),
 		LootDir:      "loot", // default
 		pq:           make(PriorityQueue, 0),
+		Signal:       make(chan struct{}, 1),
 		AuthHold:     authHold,
 		SessionCache: make(map[string]*smb.Session),
 		SafeShares:   safeShares,
@@ -118,6 +120,12 @@ func (s *Scheduler) PrioritizeJob(jobID string) {
 			item.ScheduledTime = time.Now().Add(-1 * time.Hour) // Past
 			// Fix heap
 			heap.Fix(&s.pq, i)
+
+			// Signal loop to wake up immediately
+			select {
+			case s.Signal <- struct{}{}:
+			default:
+			}
 			return
 		}
 	}
@@ -198,6 +206,9 @@ func (s *Scheduler) scheduleLoop() {
 				s.mu.Lock()
 				heap.Pop(&s.pq)
 				s.mu.Unlock()
+			case <-s.Signal:
+				// Interrupted by prioritization, loop around to re-evaluate nextJob
+				continue
 			}
 		} else {
 			select {
@@ -209,6 +220,8 @@ func (s *Scheduler) scheduleLoop() {
 				s.mu.Unlock()
 			case <-timerCh:
 				// Time to check queue again
+			case <-s.Signal:
+				// Interrupted, loop around
 			}
 		}
 	}

@@ -73,6 +73,7 @@ type Model struct {
 
 	// Queue View
 	QueueScroll int
+	QueueCursor int
 
 	// Discovery
 	PendingHosts    []utils.Host
@@ -252,8 +253,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.ActiveTab == viewQueue {
 				queueItems := m.Scheduler.GetQueueSnapshot()
-				if m.QueueScroll < len(queueItems)-1 {
-					m.QueueScroll++
+				if m.QueueCursor < len(queueItems)-1 {
+					m.QueueCursor++
+					if m.QueueCursor >= m.QueueScroll+m.ListHeight {
+						m.QueueScroll++
+					}
 				}
 			}
 
@@ -280,8 +284,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			} else if m.ActiveTab == viewQueue {
-				if m.QueueScroll > 0 {
-					m.QueueScroll--
+				if m.QueueCursor > 0 {
+					m.QueueCursor--
+					if m.QueueCursor < m.QueueScroll {
+						m.QueueScroll--
+					}
 				}
 			}
 
@@ -340,8 +347,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.ActiveTab == viewQueue {
 				// Queue Force
 				snapshot := m.Scheduler.GetQueueSnapshot()
-				if m.QueueScroll < len(snapshot) {
-					item := snapshot[m.QueueScroll]
+				if m.QueueCursor < len(snapshot) { // Use Cursor!
+					item := snapshot[m.QueueCursor]
 					m.Scheduler.PrioritizeJob(item.ID)
 					m.Notification = "Prioritized Job: " + item.ID
 					cmds = append(cmds, m.notify(m.Notification))
@@ -1073,7 +1080,7 @@ func (m Model) renderFooter() string {
 	case viewLog:
 		// commands = append(commands, "")
 	case viewQueue:
-		commands = append(commands, "j/k:Scroll")
+		commands = append(commands, "j/k:Nav", "f:Force")
 	}
 
 	// Add Discovery Progress to footer if scanning
@@ -1198,7 +1205,7 @@ func (m Model) queueView() string {
 	items := m.Scheduler.GetQueueSnapshot()
 
 	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Bold(true)
-	header := headerStyle.Render(fmt.Sprintf("%-20s %-10s %-20s %s", "ID", "TYPE", "TARGET", "SCHEDULE")) + "\n"
+	header := headerStyle.Render(fmt.Sprintf("  %-20s %-10s %-20s %s", "ID", "TYPE", "TARGET", "SCHEDULE")) + "\n"
 
 	content := ""
 	if len(items) == 0 {
@@ -1215,6 +1222,10 @@ func (m Model) queueView() string {
 
 		for i := start; i < end; i++ {
 			item := items[i]
+			cursor := "  "
+			if m.QueueCursor == i {
+				cursor = "> "
+			}
 
 			// Format ScheduledTime logic
 			schedStr := "NOW"
@@ -1234,7 +1245,8 @@ func (m Model) queueView() string {
 				actionColor = lipgloss.Color("33")
 			}
 
-			row := fmt.Sprintf("%-20s %-10s %-20s %s",
+			row := fmt.Sprintf("%s%-20s %-10s %-20s %s",
+				cursor,
 				truncate(item.ID, 18),
 				item.ActionType,
 				truncate(item.HostIP, 18),
