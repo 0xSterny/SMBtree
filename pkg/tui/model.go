@@ -55,6 +55,7 @@ type Model struct {
 
 	// Scrolling
 	WindowHeight int
+	WindowWidth  int
 	ListHeight   int
 	HostsScroll  int
 	TreeScroll   int
@@ -205,6 +206,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Notification = ""
 	case tea.WindowSizeMsg:
 		m.WindowHeight = msg.Height
+		m.WindowWidth = msg.Width
 		m.ListHeight = msg.Height - 6 // Header(4) + Footer(2)
 		if m.ListHeight < 1 {
 			m.ListHeight = 1
@@ -872,7 +874,11 @@ func (m Model) View() string {
 	for i, t := range tabs {
 		headerParts = append(headerParts, renderTab(t, activeView(i) == m.ActiveTab))
 	}
-	header := strings.Join(headerParts, " ") + "\n" + strings.Repeat("-", 40) + "\n"
+	width := m.WindowWidth
+	if width == 0 {
+		width = 80 // Fallback
+	}
+	header := strings.Join(headerParts, " ") + "\n" + strings.Repeat("-", width) + "\n"
 
 	content := ""
 	switch m.ActiveTab {
