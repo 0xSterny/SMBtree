@@ -69,6 +69,12 @@ Load targets from a file, spread authentication over time, and configure exfiltr
 -   **x**: Generate text report.
 -   **Ctrl+C**: Quit.
 
+### Proxied Scan
+Connect via SOCKS5 proxy and increase timeout for slow connections.
+```bash
+./smbtree 10.10.0.0/24 -u administrator -p 'Password123' --proxy socks5://127.0.0.1:9050 --timeout 10s
+```
+
 ### Full Usage Manual
 ```text
 Usage: smbtree [flags] <target>
@@ -122,4 +128,10 @@ Mode Flags:
     	Run in headless scan mode
   -no-ping
     	Disable ping sweep/live host discovery (treat all targets as live)
+
+Network Flags:
+  -proxy string
+        SOCKS5 Proxy URL (e.g. socks5://127.0.0.1:9050)
+  -timeout string
+        Connection timeout (default 5s)
 ```

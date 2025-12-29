@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"golang.org/x/net/proxy"
 )
 
 // TreeRow unifies Hosts and FileNodes for the Global Tree View
@@ -89,6 +90,10 @@ type Model struct {
 	PendingHosts    []utils.Host
 	DiscoveryChan   chan []utils.Host
 	DiscoveryActive bool
+
+	// Network
+	Dialer  proxy.Dialer
+	Timeout time.Duration
 }
 
 type ClearNotificationMsg struct{}
@@ -148,8 +153,8 @@ func waitForScheduler(s *queue.Scheduler) tea.Cmd {
 	}
 }
 
-func NewModel(hosts []utils.Host, exfilCfg exfil.Config, exfilDur time.Duration, workerCount int, depth int, lootDir string, authHold bool, safeShares bool, blindMode bool, jitter time.Duration) Model {
-	s := queue.NewScheduler(workerCount, exfilCfg, authHold, safeShares, blindMode, jitter)
+func NewModel(hosts []utils.Host, exfilCfg exfil.Config, exfilDur time.Duration, workerCount int, depth int, lootDir string, authHold bool, safeShares bool, blindMode bool, jitter time.Duration, dialer proxy.Dialer, timeout time.Duration) Model {
+	s := queue.NewScheduler(workerCount, exfilCfg, authHold, safeShares, blindMode, jitter, dialer, timeout)
 	s.SetLootDir(lootDir)
 	s.Start()
 
@@ -165,6 +170,8 @@ func NewModel(hosts []utils.Host, exfilCfg exfil.Config, exfilDur time.Duration,
 		PendingHosts:  nil, // Set manually or via helper
 		DiscoveryChan: make(chan []utils.Host, 10),
 		LogAutoScroll: true,
+		Dialer:        dialer,
+		Timeout:       timeout,
 	}
 }
 
@@ -179,7 +186,7 @@ func (m Model) Init() tea.Cmd {
 	if len(m.PendingHosts) > 0 {
 		// Discovery Mode
 		m.DiscoveryActive = true
-		go scanner.PerformDiscovery(m.PendingHosts, m.DiscoveryChan, 100)
+		go scanner.PerformDiscovery(m.PendingHosts, m.DiscoveryChan, 100, m.Dialer, m.Timeout)
 		cmds = append(cmds, waitForDiscovery(m.DiscoveryChan))
 		m.Logs = append(m.Logs, fmt.Sprintf("[%s] Starting Ping Sweep on %d targets...", time.Now().Format("15:04:05"), len(m.PendingHosts)))
 	} else {

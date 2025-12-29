@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/proxy"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -70,9 +72,13 @@ type Scheduler struct {
 	SafeShares bool
 	BlindMode  bool
 	FileJitter time.Duration
+
+	// Network
+	Dialer  proxy.Dialer
+	Timeout time.Duration
 }
 
-func NewScheduler(workerCount int, exfilCfg exfil.Config, authHold bool, safeShares bool, blindMode bool, jitter time.Duration) *Scheduler {
+func NewScheduler(workerCount int, exfilCfg exfil.Config, authHold bool, safeShares bool, blindMode bool, jitter time.Duration, dialer proxy.Dialer, timeout time.Duration) *Scheduler {
 	return &Scheduler{
 		Queue:        make(chan utils.QueueItem, 100),
 		Output:       make(chan tea.Msg, 100),
@@ -86,6 +92,8 @@ func NewScheduler(workerCount int, exfilCfg exfil.Config, authHold bool, safeSha
 		SafeShares:   safeShares,
 		BlindMode:    blindMode,
 		FileJitter:   jitter,
+		Dialer:       dialer,
+		Timeout:      timeout,
 	}
 }
 
@@ -246,7 +254,7 @@ func (s *Scheduler) getSession(job utils.QueueItem) (*smb.Session, bool, error) 
 	}
 
 	// Not cached or caching disabled
-	sess, err := smb.Connect(job.HostIP, job.Host.Creds)
+	sess, err := smb.Connect(job.HostIP, job.Host.Creds, s.Dialer, s.Timeout)
 	if err != nil {
 		return nil, false, err
 	}

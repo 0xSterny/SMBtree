@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hirochachacha/go-smb2"
+	"golang.org/x/net/proxy"
 )
 
 // Session wraps the SMB connection
@@ -17,7 +18,7 @@ type Session struct {
 	session *smb2.Session
 }
 
-func Connect(host string, creds utils.Credential) (*Session, error) {
+func Connect(host string, creds utils.Credential, dialer proxy.Dialer, timeout time.Duration) (*Session, error) {
 	// Handle UPN (user@domain) if domain is empty
 	if creds.Domain == "" && strings.Contains(creds.Username, "@") {
 		parts := strings.Split(creds.Username, "@")
@@ -27,7 +28,16 @@ func Connect(host string, creds utils.Credential) (*Session, error) {
 		}
 	}
 
-	conn, err := net.DialTimeout("tcp", host+":445", 2*time.Second)
+	target := host + ":445"
+	var conn net.Conn
+	var err error
+
+	if dialer != nil {
+		conn, err = dialer.Dial("tcp", target)
+	} else {
+		conn, err = net.DialTimeout("tcp", target, timeout)
+	}
+
 	if err != nil {
 		return nil, err
 	}

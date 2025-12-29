@@ -1,7 +1,6 @@
 package scanner
 
 import (
-	"fmt"
 	"path/filepath"
 	"smbtree/pkg/smb"
 	"smbtree/pkg/utils"
@@ -13,10 +12,7 @@ import (
 
 // ScanHost enumerates shares and starts walking them
 func ScanHost(s *smb.Session, h *utils.Host, maxDepth int, safeShares bool, blindMode bool, jitter time.Duration) ([]*utils.FileNode, error) {
-	// JIT Liveness Check
-	if !CheckHostLive(h.IP) {
-		return nil, fmt.Errorf("host unreachable (port 445)")
-	}
+	// JIT Liveness Check removed - we have an active session so we are connected.
 
 	shares, err := s.ListShares()
 	if err != nil {

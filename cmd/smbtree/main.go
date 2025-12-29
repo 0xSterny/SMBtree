@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"math/rand"
+	"net/url"
 	"os"
 	"smbtree/pkg/exfil"
 	"smbtree/pkg/queue"
@@ -14,6 +15,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"golang.org/x/net/proxy"
 )
 
 // reorderArgs moves flags to the front and non-flag arguments (targets) to the end
@@ -99,9 +101,12 @@ func main() {
 	flag.StringVar(lootDir, "loot", "loot", "Local directory for looted files (alias)")
 
 	// 4. Mode
-	// 4. Mode
 	headlessMode := flag.Bool("headless", false, "Run in headless scan mode")
 	depth := flag.Int("D", 2, "Depth of directory crawl (default 2)")
+
+	// 5. Network
+	proxyURL := flag.String("proxy", "", "SOCKS5 Proxy URL (e.g. socks5://127.0.0.1:9050)")
+	timeoutStr := flag.String("timeout", "5s", "Connection timeout (default 5s)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags] <target>\n", os.Args[0])
@@ -135,7 +140,11 @@ func main() {
 
 		fmt.Fprintln(os.Stderr, "\nMode Flags:")
 		fmt.Fprintf(os.Stderr, "  -headless\n    \tRun in headless scan mode\n")
-		fmt.Fprintf(os.Stderr, "  -no-ping\n    \tDisable ping sweep/live host discovery (treat all targets as live)\n")
+		fmt.Fprintf(os.Stderr, "  -no-ping\n    \tDisable ping sweep/live host discovery\n")
+
+		fmt.Fprintln(os.Stderr, "\nNetwork Flags:")
+		fmt.Fprintf(os.Stderr, "  -proxy string\n    \tSOCKS5 Proxy URL (e.g. socks5://127.0.0.1:9050)\n")
+		fmt.Fprintf(os.Stderr, "  -timeout string\n    \tConnection timeout (default 5s)\n")
 	}
 
 	flag.Parse()
@@ -151,6 +160,13 @@ func main() {
 	hosts, err := utils.ParseInput(targetInput)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Could not load targets: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Parse Timeout
+	timeout, err := time.ParseDuration(*timeoutStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid timeout: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -235,14 +251,30 @@ func main() {
 	authHold := parseBool(*authHoldStr)
 	safeShares := parseBool(*safeSharesStr)
 
+	// Setup Proxy
+	var dialer proxy.Dialer
+	if *proxyURL != "" {
+		u, err := url.Parse(*proxyURL)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid proxy URL: %v\n", err)
+			os.Exit(1)
+		}
+		dialer, err = proxy.FromURL(u, proxy.Direct)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to create proxy dialer: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Using Proxy: %s\n", *proxyURL)
+	}
+
 	if *headlessMode {
-		runHeadless(hosts, exfilCfg, *threads, *depth, *lootDir, authHold, safeShares, *blindMode, jitter)
+		runHeadless(hosts, exfilCfg, *threads, *depth, *lootDir, authHold, safeShares, *blindMode, jitter, dialer, timeout)
 		return
 	}
 
 	// Reverted to always loading hosts directly due to Discovery TUI issues
 	// We will handle liveness checking JIT in the scanner
-	m := tui.NewModel(hosts, exfilCfg, exfilDur, *threads, *depth, *lootDir, authHold, safeShares, *blindMode, jitter)
+	m := tui.NewModel(hosts, exfilCfg, exfilDur, *threads, *depth, *lootDir, authHold, safeShares, *blindMode, jitter, dialer, timeout)
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
@@ -252,9 +284,9 @@ func main() {
 	}
 }
 
-func runHeadless(hosts []utils.Host, exfilCfg exfil.Config, workerCount int, depth int, lootDir string, authHold bool, safeShares bool, blindMode bool, jitter time.Duration) {
+func runHeadless(hosts []utils.Host, exfilCfg exfil.Config, workerCount int, depth int, lootDir string, authHold bool, safeShares bool, blindMode bool, jitter time.Duration, dialer proxy.Dialer, timeout time.Duration) {
 	fmt.Println("Starting headless scan...")
-	s := queue.NewScheduler(workerCount, exfilCfg, authHold, safeShares, blindMode, jitter)
+	s := queue.NewScheduler(workerCount, exfilCfg, authHold, safeShares, blindMode, jitter, dialer, timeout)
 	s.SetLootDir(lootDir)
 	s.Start()
 
@@ -284,7 +316,7 @@ func runHeadless(hosts []utils.Host, exfilCfg exfil.Config, workerCount int, dep
 	// We know how many hosts.
 	completed := 0
 	total := len(hosts)
-	timeout := time.After(30 * time.Second)
+	scanTimeoutCh := time.After(30 * time.Second)
 
 	for completed < total {
 		select {
@@ -306,7 +338,7 @@ func runHeadless(hosts []utils.Host, exfilCfg exfil.Config, workerCount int, dep
 					completed++
 				}
 			}
-		case <-timeout:
+		case <-scanTimeoutCh:
 			fmt.Println("Scan timed out.")
 			completed = total // force exit
 		}
