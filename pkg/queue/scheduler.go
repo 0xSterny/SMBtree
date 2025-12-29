@@ -9,6 +9,7 @@ import (
 	"smbtree/pkg/scanner"
 	"smbtree/pkg/smb"
 	"smbtree/pkg/utils"
+	"strings"
 	"sync"
 	"time"
 
@@ -260,56 +261,92 @@ func (s *Scheduler) getSession(job utils.QueueItem) (*smb.Session, bool, error) 
 }
 
 func (s *Scheduler) processJobWithRetry(job utils.QueueItem) {
-	// Wrapper to handle session retry
-	session, usedCache, err := s.getSession(job)
-	if err != nil {
-		s.sendError(job, err.Error())
-		return
-	}
-
-	// If we aren't holding auth, we ensure we close it
-	if !s.AuthHold {
-		defer session.Close()
-	}
-
-	// Try execution
-	err = s.executeJob(session, job)
-	if err != nil {
-		// If failure AND we used a cached session, maybe it timed out?
-		if s.AuthHold && usedCache {
-			// Log retry?
-			f, _ := os.OpenFile("scheduler.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			if f != nil {
-				fmt.Fprintf(f, "Job %s failed on cached session. Retrying...\n", job.ID)
-				f.Close()
+	// Attempt up to 3 times for "signing required" errors
+	maxRetries := 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Wrapper to handle session retry
+		session, usedCache, err := s.getSession(job)
+		if err != nil {
+			// Connect error
+			if attempt < maxRetries && (isSigningError(err) || (s.AuthHold && usedCache)) {
+				// Retryable
+				// Invalidate if cached
+				if s.AuthHold && usedCache {
+					s.CacheMu.Lock()
+					delete(s.SessionCache, job.HostIP)
+					s.CacheMu.Unlock()
+				}
+				time.Sleep(500 * time.Millisecond)
+				continue
 			}
+			s.sendError(job, err.Error())
+			return
+		}
 
-			// Invalidate cache
-			s.CacheMu.Lock()
-			delete(s.SessionCache, job.HostIP)
-			s.CacheMu.Unlock()
-			// Close old session just in case
-			session.Close()
+		// If we aren't holding auth, we ensure we close it
+		// But in a loop, we must close it if we are about to retry or return
+		// So defer is tricky.
+		// We will manually close if not AuthHold OR if we hit error and retry.
 
-			// Re-connect
-			newSess, _, err2 := s.getSession(job)
-			if err2 != nil {
-				s.sendError(job, "Retry Connect Fail: "+err2.Error())
-				return
-			}
-			// No defer close because it's in cache now
-
-			// Retry execute
-			err = s.executeJob(newSess, job)
-			if err != nil {
-				s.sendError(job, "Retry Exec Fail: "+err.Error())
+		// Try execution
+		err = s.executeJob(session, job)
+		if err == nil {
+			// Success
+			if !s.AuthHold {
+				session.Close()
 			}
 			return
 		}
-		// Not cached, or retry failed
+
+		// Check Error
+		isSigning := isSigningError(err)
+
+		// If failure AND we used a cached session, maybe it timed out?
+		// OR if it's a signing error
+		if attempt < maxRetries && (isSigning || (s.AuthHold && usedCache)) {
+			// Retryable
+			f, _ := os.OpenFile("scheduler.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if f != nil {
+				fmt.Fprintf(f, "Job %s failed (Attempt %d/%d): %v. Retrying...\n", job.ID, attempt, maxRetries, err)
+				f.Close()
+			}
+
+			// Invalidate/Close
+			if s.AuthHold {
+				s.CacheMu.Lock()
+				delete(s.SessionCache, job.HostIP)
+				s.CacheMu.Unlock()
+			}
+			session.Close()
+
+			time.Sleep(500 * time.Millisecond) // Slight backoff
+			continue
+		}
+
+		// Not retryable or out of retries
+		if !s.AuthHold {
+			session.Close()
+		}
 		s.sendError(job, err.Error())
 		return
 	}
+}
+
+func isSigningError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	// Check for specific substrings
+	// "invalid response error" (often precedes signing requirement issues in some libraries)
+	// "signing required"
+	targets := []string{"signing required", "invalid response error"}
+	for _, t := range targets {
+		if strings.Contains(s, t) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Scheduler) sendError(job utils.QueueItem, msg string) {
