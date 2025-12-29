@@ -32,8 +32,10 @@ SMBtree is written in Go. To build it from source:
 
 ```bash
 go build -o smbtree cmd/smbtree/main.go
-# Linux Cross-compile
+# OS Specific Cross-compile
 GOOS=linux go build -o smbtree-linux cmd/smbtree/main.go
+GOOS=windows go build -o smbtree-windows cmd/smbtree/main.go
+GOOS=darwin go build -o smbtree-macos cmd/smbtree/main.go
 ```
 
 ## Usage
