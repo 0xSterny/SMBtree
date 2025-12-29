@@ -30,6 +30,14 @@ type TreeRow struct {
 	Permissions utils.PermFlags // Permissions for the node, useful for color
 }
 
+type TickMsg time.Time
+
+func doTick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return TickMsg(t)
+	})
+}
+
 type activeView int
 
 const (
@@ -205,6 +213,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ClearNotificationMsg:
 		m.Notification = ""
+	case TickMsg:
+		if m.ActiveTab == viewQueue {
+			cmds = append(cmds, doTick())
+		}
 	case tea.WindowSizeMsg:
 		m.WindowHeight = msg.Height
 		m.WindowWidth = msg.Width
@@ -224,6 +236,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.ActiveTab == viewLoot {
 				m.reloadLoot()
+			}
+			if m.ActiveTab == viewQueue {
+				cmds = append(cmds, doTick())
 			}
 
 		case "j", "down":
