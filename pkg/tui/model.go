@@ -136,8 +136,8 @@ func waitForScheduler(s *queue.Scheduler) tea.Cmd {
 	}
 }
 
-func NewModel(hosts []utils.Host, exfilCfg exfil.Config, exfilDur time.Duration, workerCount int, depth int, lootDir string) Model {
-	s := queue.NewScheduler(workerCount, exfilCfg)
+func NewModel(hosts []utils.Host, exfilCfg exfil.Config, exfilDur time.Duration, workerCount int, depth int, lootDir string, authHold bool, safeShares bool, blindMode bool, jitter time.Duration) Model {
+	s := queue.NewScheduler(workerCount, exfilCfg, authHold, safeShares, blindMode, jitter)
 	s.SetLootDir(lootDir)
 	s.Start()
 
@@ -327,8 +327,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "f": // Force
-			if cmd := m.forceExecute(); cmd != nil {
-				cmds = append(cmds, cmd)
+			if m.ActiveTab == viewHosts {
+				if cmd := m.forceExecute(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			} else if m.ActiveTab == viewTree {
+				if cmd := m.forceExecute(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			} else if m.ActiveTab == viewQueue {
+				// Queue Force
+				snapshot := m.Scheduler.GetQueueSnapshot()
+				if m.QueueScroll < len(snapshot) {
+					item := snapshot[m.QueueScroll]
+					m.Scheduler.PrioritizeJob(item.ID)
+					m.Notification = "Prioritized Job: " + item.ID
+					cmds = append(cmds, m.notify(m.Notification))
+				}
 			}
 
 		case "d", "D": // Depth Expand

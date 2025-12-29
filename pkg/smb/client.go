@@ -34,9 +34,10 @@ func Connect(host string, creds utils.Credential) (*Session, error) {
 
 	d := &smb2.Dialer{
 		Initiator: &smb2.NTLMInitiator{
-			User:     creds.Username,
-			Password: creds.Password,
-			Domain:   creds.Domain,
+			User:        creds.Username,
+			Password:    creds.Password,
+			Domain:      creds.Domain,
+			Workstation: "WIN-WORKSTATION",
 		},
 	}
 

