@@ -11,6 +11,21 @@ SMBtree is a high-speed, TUI-based SMB enumeration and exfiltration tool designe
 -   **OPSEC Safe**: Use `-s` (Safe Shares), `-b` (Blind Mode), and `-a` (Auth Hold) to reduce log noise.
 -   **Exfiltration**: Automated recursive downloading and "Loot" management.
 
+## Screenshots
+
+### Loot Management
+Easily view, convert, and inspect captured files within the TUI.
+![Loot View](assets/smbtree-loot.png)
+
+### Tree Browser
+Navigate shares and directories visually. Expand nodes (`Enter`), select files (`Space`), and queue downloads.
+![Tree View](assets/smbtree-tree.png)
+
+### Job Queue
+Monitor active jobs, view status, and prioritize specific tasks (`f`) in real-time.
+![Queue View](assets/smbtree-queue.png)
+
+
 ## Installation
 
 SMBtree is written in Go. To build it from source:
