@@ -62,11 +62,13 @@ type Model struct {
 	ScanDepth     int
 
 	// Scrolling
-	WindowHeight int
-	WindowWidth  int
-	ListHeight   int
-	HostsScroll  int
-	TreeScroll   int
+	WindowHeight  int
+	WindowWidth   int
+	ListHeight    int
+	HostsScroll   int
+	TreeScroll    int
+	LogScroll     int
+	LogAutoScroll bool
 
 	// Notifications
 	Notification string
@@ -162,6 +164,7 @@ func NewModel(hosts []utils.Host, exfilCfg exfil.Config, exfilDur time.Duration,
 		LootViewport:  viewport.New(80, 20),
 		PendingHosts:  nil, // Set manually or via helper
 		DiscoveryChan: make(chan []utils.Host, 10),
+		LogAutoScroll: true,
 	}
 }
 
@@ -274,6 +277,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.QueueScroll++
 					}
 				}
+			} else if m.ActiveTab == viewLog {
+				if !m.LogAutoScroll {
+					m.LogScroll++
+					// If we hit bottom, enable auto-scroll
+					if m.LogScroll >= len(m.Logs)-m.ListHeight {
+						m.LogAutoScroll = true
+					}
+				}
 			}
 
 		case "k", "up":
@@ -303,6 +314,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.QueueCursor--
 					if m.QueueCursor < m.QueueScroll {
 						m.QueueScroll--
+					}
+				}
+			} else if m.ActiveTab == viewLog {
+				if m.LogAutoScroll {
+					m.LogAutoScroll = false
+					m.LogScroll = len(m.Logs) - m.ListHeight - 1
+					if m.LogScroll < 0 {
+						m.LogScroll = 0
+					}
+				} else {
+					if m.LogScroll > 0 {
+						m.LogScroll--
 					}
 				}
 			}
@@ -1052,12 +1075,27 @@ func (m Model) View() string {
 		content = m.lootView()
 	case viewLog:
 		content = "Activity Logs:\n\n"
-		// Show last N lines (using ListHeight)
-		start := 0
-		if len(m.Logs) > m.ListHeight {
+
+		start := m.LogScroll
+		// If AutoScroll is ON, force to bottom
+		if m.LogAutoScroll {
 			start = len(m.Logs) - m.ListHeight
 		}
-		for i := start; i < len(m.Logs); i++ {
+
+		// Bounds check
+		if start < 0 {
+			start = 0
+		}
+		if start > len(m.Logs) {
+			start = len(m.Logs)
+		}
+
+		end := start + m.ListHeight
+		if end > len(m.Logs) {
+			end = len(m.Logs)
+		}
+
+		for i := start; i < end; i++ {
 			content += m.Logs[i] + "\n"
 		}
 	case viewQueue:
@@ -1093,7 +1131,7 @@ func (m Model) renderFooter() string {
 	case viewLoot:
 		commands = append(commands, "j/k:Nav", "enter:Expand/View")
 	case viewLog:
-		// commands = append(commands, "")
+		commands = append(commands, "j/k:Scroll")
 	case viewQueue:
 		commands = append(commands, "j/k:Nav", "f:Force")
 	}
