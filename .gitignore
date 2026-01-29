@@ -16,4 +16,13 @@ loot/
 
 # OS
 .DS_Store
-Thumbs.db
+
+# Sensitive/Unwanted
+implementation_plan.md
+kali_key*
+looting_report.md
+targets*
+test_http_exfil.py
+CONTEXT.md
+
+final_build/

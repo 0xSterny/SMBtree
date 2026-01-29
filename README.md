@@ -48,20 +48,14 @@ Scan a CIDR range with full speed (no jitter) and increased threads.
 
 ### Low & Slow (Stealth / Exfiltration)
 Load targets from a file, spread authentication over time, and configure exfiltration windows.
-**Note: All duration flags accept values in MINUTES. Add the m to the end of the value (e.g. 1m, 2m, 5m, etc.)**
+**Note: All duration flags accept values in MINUTES.**
 
 ```bash
 # Stealthy Scan (Persistent Session, Blind Mode, Safe Shares, 1 second jitter)
-./smbtree hosts.txt -u user1 -p 'Password123' -d devop.local -b -j 1s -a
+./smbtree hosts.txt -u administrator -p 'Password123' -d devop.local -b -j 1s -s -a
 
-# Aggressive
-./smbtree hosts.txt -u administrator -p Password123 -no-limit -t 50 -s false
-```
-
-### Proxied Scan
-Connect via SOCKS5 proxy and increase timeout for slow connections.
-```bash
-./smbtree 10.10.0.0/24 -u administrator -p 'Password123' --proxy socks5://127.0.0.1:9050 --timeout 10s
+# Aggressive (Old Behavior)
+./smbtree hosts.txt -u pwn -p pwn -no-limit -t 50 -auth-hold=false -safe-shares=false
 ```
 
 ### Key Bindings
@@ -75,6 +69,11 @@ Connect via SOCKS5 proxy and increase timeout for slow connections.
 -   **x**: Generate text report.
 -   **Ctrl+C**: Quit.
 
+### Proxied Scan
+Connect via SOCKS5 proxy and increase timeout for slow connections.
+```bash
+./smbtree 10.10.0.0/24 -u administrator -p 'Password123' --proxy socks5://127.0.0.1:9050 --timeout 10s
+```
 
 ### Full Usage Manual
 ```text

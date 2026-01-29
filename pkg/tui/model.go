@@ -411,6 +411,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			utils.GenerateReport(m.Hosts)
 			m.Notification = "Generated Report"
 			cmds = append(cmds, m.notify(m.Notification))
+
+		case "z": // Unzip/Extract
+			if m.ActiveTab == viewLoot {
+				if cmd := m.handleLootExtract(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
 		}
 
 	case AuthMsg:
@@ -1192,6 +1199,31 @@ func (m *Model) handleLootEnter() tea.Cmd {
 			m.LootViewport.SetContent(content)
 			m.Notification = "Loaded " + node.Name
 			return m.notify(m.Notification)
+		}
+	}
+	return nil
+}
+
+func (m *Model) handleLootExtract() tea.Cmd {
+	nodes := flattenNodes(m.LootNodes)
+	if m.LootCursor >= 0 && m.LootCursor < len(nodes) {
+		node := nodes[m.LootCursor]
+		if !node.IsDir {
+			// Check extension
+			ext := strings.ToLower(filepath.Ext(node.Path))
+			switch ext {
+			case ".zip", ".tar", ".gz", ".rar", ".7z", ".tgz":
+				// Attempt extract
+				dest, err := loot.ExtractArchive(node.Path)
+				if err != nil {
+					m.Notification = "Extract Fail: " + err.Error()
+				} else {
+					m.Notification = "Extracted to: " + filepath.Base(dest)
+					// Reload loot to show new dir
+					m.reloadLoot()
+				}
+				return m.notify(m.Notification)
+			}
 		}
 	}
 	return nil
