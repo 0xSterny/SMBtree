@@ -234,6 +234,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.ListHeight < 1 {
 			m.ListHeight = 1
 		}
+		m.resizeLootViewport()
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -335,6 +336,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.LogScroll--
 					}
 				}
+			}
+
+		case "pgdown", "pagedown":
+			if m.ActiveTab == viewLoot {
+				m.LootViewport.ViewDown()
+			}
+
+		case "pgup", "pageup":
+			if m.ActiveTab == viewLoot {
+				m.LootViewport.ViewUp()
 			}
 
 		case "enter":
@@ -1143,7 +1154,7 @@ func (m Model) renderFooter() string {
 		red := lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("Red:NoAccess")
 		commands = append(commands, "|", green, red)
 	case viewLoot:
-		commands = append(commands, "j/k:Nav", "enter:Expand/View")
+		commands = append(commands, "j/k:Nav", "enter:Expand/View", "pgup/pgdn:Preview Scroll")
 	case viewLog:
 		commands = append(commands, "j/k:Scroll")
 	case viewQueue:
@@ -1184,6 +1195,50 @@ func (m *Model) reloadLoot() {
 	m.LootLoaded = true
 }
 
+func (m Model) lootPaneSizes() (treeWidth, viewportWidth, height int) {
+	width := m.WindowWidth
+	if width <= 0 {
+		width = 100
+	}
+
+	height = m.ListHeight
+	if height <= 0 {
+		height = 20
+	}
+
+	treeWidth = width * 30 / 100
+	if treeWidth < 20 {
+		treeWidth = 20
+	}
+	if treeWidth > 40 {
+		treeWidth = 40
+	}
+
+	// The loot tree has a right border, so reserve one column for it.
+	viewportWidth = width - treeWidth - 1
+	if viewportWidth < 1 {
+		viewportWidth = 1
+	}
+	if treeWidth > width-2 {
+		treeWidth = width - 2
+		if treeWidth < 1 {
+			treeWidth = 1
+		}
+		viewportWidth = 1
+	}
+
+	return treeWidth, viewportWidth, height
+}
+
+func (m *Model) resizeLootViewport() {
+	_, viewportWidth, height := m.lootPaneSizes()
+	m.LootViewport.Width = viewportWidth
+	m.LootViewport.Height = height
+	if m.LootViewport.PastBottom() {
+		m.LootViewport.GotoBottom()
+	}
+}
+
 func (m *Model) handleLootEnter() tea.Cmd {
 	nodes := flattenNodes(m.LootNodes)
 	if m.LootCursor >= 0 && m.LootCursor < len(nodes) {
@@ -1197,6 +1252,7 @@ func (m *Model) handleLootEnter() tea.Cmd {
 				content = "Error reading file: " + err.Error()
 			}
 			m.LootViewport.SetContent(content)
+			m.LootViewport.GotoTop()
 			m.Notification = "Loaded " + node.Name
 			return m.notify(m.Notification)
 		}
@@ -1230,17 +1286,11 @@ func (m *Model) handleLootExtract() tea.Cmd {
 }
 
 func (m Model) lootView() string {
-	// Split view: Left (Tree 30%), Right (Viewport 70%)
-	width := 100 // Default
-	// We can try to use WindowHeight/Width if we had them or check Viewport
-
-	treeWidth := 30
-	viewportWidth := width - treeWidth - 4
-
-	if m.LootViewport.Width == 0 {
-		m.LootViewport.Width = viewportWidth
-		m.LootViewport.Height = m.ListHeight
-	}
+	// Split view: left tree and right file preview sized to the terminal.
+	treeWidth, viewportWidth, height := m.lootPaneSizes()
+	lootViewport := m.LootViewport
+	lootViewport.Width = viewportWidth
+	lootViewport.Height = height
 
 	// Render Tree
 	treeView := ""
@@ -1288,7 +1338,7 @@ func (m Model) lootView() string {
 
 	rightBox := lipgloss.NewStyle().
 		Width(viewportWidth).
-		Render(m.LootViewport.View())
+		Render(lootViewport.View())
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftBox, rightBox)
 }
