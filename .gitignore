@@ -7,8 +7,8 @@ smbtree
 smbtree-linux*
 smbtree-macos*
 
-# Loot
-loot/
+# Loot (runtime output dir at repo root only; must not match pkg/loot/)
+/loot/
 
 # IDE
 .vscode/
