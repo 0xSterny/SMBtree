@@ -24,5 +24,3 @@ looting_report.md
 targets*
 test_http_exfil.py
 CONTEXT.md
-
-final_build/
