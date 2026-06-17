@@ -2,8 +2,8 @@ package scanner
 
 import (
 	"path/filepath"
-	"smbtree/pkg/smb"
-	"smbtree/pkg/utils"
+	"github.com/0xSterny/SMBtree/pkg/smb"
+	"github.com/0xSterny/SMBtree/pkg/utils"
 	"strings"
 	"time"
 

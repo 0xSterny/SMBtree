@@ -28,7 +28,19 @@ Monitor active jobs, view status, and prioritize specific tasks (`f`) in real-ti
 
 ## Installation
 
-SMBtree is written in Go. To build it from source:
+SMBtree is written in Go.
+
+### Install (Go)
+
+Install the latest release directly with the Go toolchain:
+
+```bash
+go install github.com/0xSterny/SMBtree/cmd/smbtree@latest
+```
+
+This places the `smbtree` binary in `$(go env GOPATH)/bin` (ensure it's on your `PATH`).
+
+### Build from source
 
 ```bash
 go build -o smbtree cmd/smbtree/main.go

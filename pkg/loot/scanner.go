@@ -3,7 +3,7 @@ package loot
 import (
 	"os"
 	"path/filepath"
-	"smbtree/pkg/utils"
+	"github.com/0xSterny/SMBtree/pkg/utils"
 )
 
 // ScanLootDir recurses through the loot directory and builds a FileNode tree

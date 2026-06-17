@@ -1,4 +1,4 @@
-module smbtree
+module github.com/0xSterny/SMBtree
 
 go 1.25.0
 

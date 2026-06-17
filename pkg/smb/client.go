@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"net"
 	"os"
-	"smbtree/pkg/utils"
+	"github.com/0xSterny/SMBtree/pkg/utils"
 	"strings"
 	"time"
 

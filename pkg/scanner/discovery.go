@@ -2,7 +2,7 @@ package scanner
 
 import (
 	"net"
-	"smbtree/pkg/utils"
+	"github.com/0xSterny/SMBtree/pkg/utils"
 	"sync"
 	"time"
 
